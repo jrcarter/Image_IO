@@ -7,6 +7,7 @@ with Ada.Streams.Stream_IO;
 with Ada.Unchecked_Conversion;
 with Ada.Unchecked_Deallocation;
 with GID;
+with Image_IO.QOI;
 with PragmARC.Text_IO;
 with System;
 
@@ -187,6 +188,54 @@ package body Image_IO is
 
       RGB_IO.Close (File => File);
    end Write_BMP;
+
+   procedure Write_QOI (File_Name : in String; Image : in Image_Data) is
+      Desc : constant QOI.QOI_Desc := (Width => Image'Length (2), Height => Image'Length (1) );
+
+      Output_Length : constant QOI.Storage_Count := QOI.Encode_Worst_Case (Desc);
+
+      package Storage_Holders is new Ada.Containers.Indefinite_Holders (Element_Type => QOI.Storage_Array, "=" => QOI."=");
+
+      procedure Encode (Data : in out QOI.Storage_Array);
+      -- Encodes Image into Data; sets Length to the length of the encoded data
+
+      Data   : Storage_Holders.Holder;
+      Length : QOI.Storage_Count;
+
+      procedure Encode (Data : in out QOI.Storage_Array) is
+         subtype Image_Sub is Image_Data (Image'Range (1), Image'Range (2) );
+
+         use type QOI.Storage_Count;
+
+         subtype Image_List is QOI.Storage_Array (1 .. 3 * Image'Length (1) * Image'Length (2) );
+
+         function To_List is new Ada.Unchecked_Conversion (Source => Image_Sub, Target => Image_List);
+      begin -- Encode
+         QOI.Encode (Pix => To_List (Image), Desc => Desc, Output => Data, Output_Size => Length);
+      end Encode;
+   begin -- Write_QOI
+      Data.Replace_Element (New_Item => (1 .. Output_Length => 0) );
+      Data.Update_Element (Process => Encode'Access);
+
+      Write : declare
+         procedure Write_File (Data : in QOI.Storage_Array);
+         -- Creates File_Name, writes Data (1 .. Length) to it, and closes the file
+
+         procedure Write_File (Data : in QOI.Storage_Array) is
+            subtype Result_List is QOI.Storage_Array (1 .. Length);
+
+            package Result_IO is new Ada.Sequential_IO (Element_Type => Result_List);
+
+            File : Result_IO.File_Type;
+         begin -- Write_File
+            Result_IO.Create (File => File, Mode => Result_IO.Out_File, Name => File_Name);
+            Result_IO.Write (File => File, Item => Data (1 .. Length) );
+            Result_IO.Close (File => File);
+         end Write_File;
+      begin -- Write
+         Data.Query_Element (Process => Write_File'Access);
+      end Write;
+   end Write_QOI;
 
    procedure Read (Name : in String; Image : in out Image_Holders.Holder) is
       procedure Load (Image : in out Image_Data);

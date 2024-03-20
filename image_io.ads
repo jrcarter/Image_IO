@@ -33,6 +33,9 @@ package Image_IO is
    procedure Write_BMP (File_Name : in String; Image : in Image_Data);
    -- Creates a file named Name; writes Image to it in BMP format; and closes the file
 
+   procedure Write_QOI (File_Name : in String; Image : in Image_Data);
+   -- Creates a file named Name; writes Image to it in QOI format; and closes the file
+
    package Image_Holders is new Ada.Containers.Indefinite_Holders (Element_Type => Image_Data);
 
    procedure Read (Name : in String; Image : in out Image_Holders.Holder) with
