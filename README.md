@@ -1,9 +1,9 @@
 # Image_IO
-Output in PPM and BMP formats; input in BMP, GIF, JPG, PNG, PNM, QOI, and TGA formats
+Output in BMP, PPM, and QOI formats; input in BMP, GIF, JPG, PNG, PNM, QOI, and TGA formats
 
 Package Image_IO provides the ability to input and output images.
 
-Uncompressed BMP is a universal format and can easily be converted to compressed formats. PPM is intended to be a set of portable formats, but lacks support by default on some platforms.
+Uncompressed BMP is a universal format and can easily be converted to compressed formats. PPM is intended to be a set of portable formats, but lacks support by default on some platforms. QOI is a lossless compressed format, but not widely supported.
 
 Write_P3 uses [PragmARC.Text_IO](https://github.com/jrcarter/PragmARC/blob/Ada-12/pragmarc-text_io.ads) to obtain uniform line terminators across platforms. This can be easily changed to Ada.Text_IO if the line terminators are not a concern.
 
