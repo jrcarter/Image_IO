@@ -284,8 +284,29 @@ package body Image_IO is
    begin -- Read
       Ada.Streams.Stream_IO.Open (File => File, Mode => Ada.Streams.Stream_IO.In_File, Name => Name);
       GID.Load_Image_Header (Image => Header, From => Ada.Streams.Stream_IO.Stream (File).all, Try_TGA => True);
-      Image.Replace_Element (New_Item => (0 .. GID.Pixel_Height (Header) - 1 => (0 .. GID.Pixel_Width (Header) - 1 => <>) ) );
-      Image.Update_Element (Process => Load'Access);
-      Ada.Streams.Stream_IO.Close (File => File);
+
+      Allocate : declare
+         type Data is array (0 .. GID.Pixel_Height (Header) - 1, 0 .. GID.Pixel_Width (Header) - 1) of Color_Info;
+         -- Work around for GNAT error 113979 https://gcc.gnu.org/bugzilla/show_bug.cgi?id=113979
+         type Data_Ptr is access Data;
+
+         procedure Free is new Ada.Unchecked_Deallocation (Object => Data, Name => Data_Ptr);
+
+         Ptr : Data_Ptr := new Data;
+      begin -- Allocate
+         Image.Replace_Element (New_Item => Image_Data (Ptr.all) );
+         Free (Ptr);
+         Image.Update_Element (Process => Load'Access);
+         Ada.Streams.Stream_IO.Close (File => File);
+      exception -- Allocate
+      when others =>
+         if Ada.Streams.Stream_IO.Is_Open (File) then
+            Ada.Streams.Stream_IO.Close (File => File);
+         end if;
+
+         Free (Ptr);
+
+         raise;
+      end Allocate;
    end Read;
 end Image_IO;
