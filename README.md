@@ -1,7 +1,7 @@
 # Image_IO
 Output in BMP, PPM, and QOI formats; input in BMP, GIF, JPG, PNG, PNM, QOI, and TGA formats
 
-Package Image_IO provides the ability to input and output images.
+Package Image_IO.Operations provides the ability to input and output images.
 
 Uncompressed BMP is a universal format and can easily be converted to compressed formats. PPM is intended to be a set of portable formats, but lacks support by default on some platforms. QOI is a lossless compressed format, but not widely supported.
 
@@ -15,4 +15,4 @@ Pure_RGB is a demo program that reads an image using Read, modifies it to change
 
 The output name is the input name with ".bmp" appended. Pure_RGB does no error handling; if the input file name is omitted, doesn't exist, or is not a supported image format, the program will terminate with an unhandled exception.
 
-Image_IO and Pure_RGB have been compiled and tested with GNAT 12.3.0 on Linux and ObjectAda 10.5U3 on Windows.
+Image_IO and Pure_RGB have been compiled and tested with GNAT 12.3.0 on Linux and ObjectAda 10.5U7 on Windows.
