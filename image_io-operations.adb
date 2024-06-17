@@ -1,4 +1,4 @@
--- Image I/O: output in PPM and BMP formats; input in BMP, GIF, JPG, PNG, PNM, QOI, and TGA formats
+-- Image I/O: output in PPM, BMP, and QOI formats; input in BMP, GIF, JPG, PNG, PNM, QOI, and TGA formats
 -- Copyright (C) by Pragmada Software Engineering
 -- Released under the terms of the BSD 3-Clause license; see https://opensource.org/licenses
 
@@ -8,10 +8,11 @@ with Ada.Unchecked_Conversion;
 with Ada.Unchecked_Deallocation;
 with GID;
 with Image_IO.QOI;
+with Image_IO.QOI_Holders;
 with PragmARC.Text_IO;
 with System;
 
-package body Image_IO is
+package body Image_IO.Operations is
    procedure Write_P3 (File_Name : in String; Image : in Image_Data) is
       Output : PragmARC.Text_IO.File_Handle;
    begin -- Write_P3
@@ -194,34 +195,43 @@ package body Image_IO is
 
       Output_Length : constant QOI.Storage_Count := QOI.Encode_Worst_Case (Desc);
 
-      package Storage_Holders is new Ada.Containers.Indefinite_Holders (Element_Type => QOI.Storage_Array, "=" => QOI."=");
-
       procedure Encode (Data : in out QOI.Storage_Array);
       -- Encodes Image into Data; sets Length to the length of the encoded data
 
-      Data   : Storage_Holders.Holder;
+      Data   : QOI_Holders.Handle;
       Length : QOI.Storage_Count;
 
       procedure Encode (Data : in out QOI.Storage_Array) is
+         procedure Convert_And_Encode (List : in out QOI.Storage_Array);
+         -- Converts Image to a Storage_Array and passes it to QOI.Encode
+
          subtype Image_Sub is Image_Data (Image'Range (1), Image'Range (2) );
 
          use type QOI.Storage_Count;
 
          subtype Image_List is QOI.Storage_Array (1 .. 3 * Image'Length (1) * Image'Length (2) );
 
-         function To_List is new Ada.Unchecked_Conversion (Source => Image_Sub, Target => Image_List);
+         procedure Convert_And_Encode (List : in out QOI.Storage_Array) is
+            function To_List is new Ada.Unchecked_Conversion (Source => Image_Sub, Target => Image_List);
+         begin -- Convert_And_Encode
+            List := To_List (Image);
+            QOI.Encode (Pix => List, Desc => Desc, Output => Data, Output_Size => Length);
+         end Convert_And_Encode;
+
+         List : QOI_Holders.Handle;
       begin -- Encode
-         QOI.Encode (Pix => To_List (Image), Desc => Desc, Output => Data, Output_Size => Length);
+         List.Create (Length => Image_List'Length);
+         List.Update (Process => Convert_And_Encode'Access);
       end Encode;
    begin -- Write_QOI
-      Data.Replace_Element (New_Item => (1 .. Output_Length => 0) );
-      Data.Update_Element (Process => Encode'Access);
+      Data.Create (Length => Output_Length);
+      Data.Update (Process => Encode'Access);
 
       Write : declare
-         procedure Write_File (Data : in QOI.Storage_Array);
+         procedure Write_File (Data : in out QOI.Storage_Array);
          -- Creates File_Name, writes Data (1 .. Length) to it, and closes the file
 
-         procedure Write_File (Data : in QOI.Storage_Array) is
+         procedure Write_File (Data : in out QOI.Storage_Array) is
             subtype Result_List is QOI.Storage_Array (1 .. Length);
 
             package Result_IO is new Ada.Sequential_IO (Element_Type => Result_List);
@@ -233,11 +243,11 @@ package body Image_IO is
             Result_IO.Close (File => File);
          end Write_File;
       begin -- Write
-         Data.Query_Element (Process => Write_File'Access);
+         Data.Update (Process => Write_File'Access);
       end Write;
    end Write_QOI;
 
-   procedure Read (Name : in String; Image : in out Image_Holders.Holder) is
+   procedure Read (Name : in String; Image : in out Holders.Handle) is
       procedure Load (Image : in out Image_Data);
       -- Load the image into Image
 
@@ -284,29 +294,8 @@ package body Image_IO is
    begin -- Read
       Ada.Streams.Stream_IO.Open (File => File, Mode => Ada.Streams.Stream_IO.In_File, Name => Name);
       GID.Load_Image_Header (Image => Header, From => Ada.Streams.Stream_IO.Stream (File).all, Try_TGA => True);
-
-      Allocate : declare
-         type Data is array (0 .. GID.Pixel_Height (Header) - 1, 0 .. GID.Pixel_Width (Header) - 1) of Color_Info;
-         -- Work around for GNAT error 113979 https://gcc.gnu.org/bugzilla/show_bug.cgi?id=113979
-         type Data_Ptr is access Data;
-
-         procedure Free is new Ada.Unchecked_Deallocation (Object => Data, Name => Data_Ptr);
-
-         Ptr : Data_Ptr := new Data;
-      begin -- Allocate
-         Image.Replace_Element (New_Item => Image_Data (Ptr.all) );
-         Free (Ptr);
-         Image.Update_Element (Process => Load'Access);
-         Ada.Streams.Stream_IO.Close (File => File);
-      exception -- Allocate
-      when others =>
-         if Ada.Streams.Stream_IO.Is_Open (File) then
-            Ada.Streams.Stream_IO.Close (File => File);
-         end if;
-
-         Free (Ptr);
-
-         raise;
-      end Allocate;
+      Image.Create (Width => GID.Pixel_Width (Header), Height => GID.Pixel_Height (Header) );
+      Image.Update (Process => Load'Access);
+      Ada.Streams.Stream_IO.Close (File => File);
    end Read;
-end Image_IO;
+end Image_IO.Operations;
