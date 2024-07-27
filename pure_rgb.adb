@@ -30,5 +30,5 @@ procedure Pure_RGB is
 begin -- Pure_RGB
    Image_IO.Operations.Read (Name => Ada.Command_Line.Argument (1), Image => Image);
    Image.Update (Process => Process'Access);
-   Image_IO.Operations.Write_BMP (File_Name => Ada.Command_Line.Argument (1) & ".bmp", Image => Image.Value);
+   Image_IO.Operations.Write_PNG (File_Name => Ada.Command_Line.Argument (1) & ".png", Image => Image.Value);
 end Pure_RGB;

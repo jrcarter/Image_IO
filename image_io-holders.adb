@@ -1,4 +1,4 @@
--- Image I/O: output in PPM, BMP, and QOI formats; input in BMP, GIF, JPG, PNG, PNM, QOI, and TGA formats
+-- Image I/O: output in PPM, BMP, PNG, and QOI formats; input in BMP, GIF, JPG, PNG, PNM, QOI, and TGA formats
 -- Copyright (C) by Pragmada Software Engineering
 -- Released under the terms of the BSD 3-Clause license; see https://opensource.org/licenses
 

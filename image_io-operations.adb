@@ -1,16 +1,18 @@
--- Image I/O: output in PPM, BMP, and QOI formats; input in BMP, GIF, JPG, PNG, PNM, QOI, and TGA formats
+-- Image I/O: output in PPM, BMP, PNG, and QOI formats; input in BMP, GIF, JPG, PNG, PNM, QOI, and TGA formats
 -- Copyright (C) by Pragmada Software Engineering
 -- Released under the terms of the BSD 3-Clause license; see https://opensource.org/licenses
 
+with Ada.Containers.Vectors;
 with Ada.Sequential_IO;
 with Ada.Streams.Stream_IO;
 with Ada.Unchecked_Conversion;
-with Ada.Unchecked_Deallocation;
+with CRC_32;
 with GID;
 with Image_IO.QOI;
 with Image_IO.QOI_Holders;
 with PragmARC.Text_IO;
 with System;
+with Z_Compression;
 
 package body Image_IO.Operations is
    procedure Write_P3 (File_Name : in String; Image : in Image_Data) is
@@ -246,6 +248,265 @@ package body Image_IO.Operations is
          Data.Update (Process => Write_File'Access);
       end Write;
    end Write_QOI;
+
+   procedure Write_PNG (File_Name : in String; Image : in Image_Data) is
+      procedure Write (File : in RGB_IO.File_Type; Item : in Interfaces.Unsigned_32);
+      -- Writes the 4 bytes of Item to File, MSB first
+
+      procedure Write (File : in RGB_IO.File_Type; Item : in Interfaces.Unsigned_32; CRC : in out CRC_32.CRC_Info);
+      -- Writes the 4 bytes of Item to File, MSB first, and updates CRC with those bytes
+
+      subtype Scanline is CRC_32.Byte_List (1 .. 3 * Image'Length (2) );
+      subtype Filtered_Scan is CRC_32.Byte_List (1 .. Scanline'Last + 1);
+
+      package Compressed_Lists is new Ada.Containers.Vectors
+         (Index_Type => Positive, Element_Type => Z_Compression.Byte_Value, "=" => Interfaces."=");
+
+      Scan   : Scanline := (others => 0);
+      Prev   : Scanline;
+      Input  : Filtered_Scan;
+      Output : Compressed_Lists.Vector;
+      Y      : Natural := 0;
+      X      : Positive := Integer'Last;
+      CRC    : CRC_32.CRC_Info;
+
+      function Out_Of_Data return Boolean is
+         (Y > Image'Last (1) );
+
+      function Next return Z_Compression.Byte_Value with
+         Pre => not Out_Of_Data;
+      -- Provide the next byte from Input to Compress
+
+      procedure Put (Byte : in Z_Compression.Byte_Value);
+      -- Appends a compressed byte to Output and updates CRC with it
+
+      procedure Compress is new Z_Compression.Compress (Out_Of_Data => Out_Of_Data, Next => Next, Put => Put);
+
+      use type Interfaces.Unsigned_32;
+
+      function Next return Z_Compression.Byte_Value is
+         function Extracted (Y : in Natural) return Scanline;
+         -- Returns the Scanline at Y in Image
+
+         use type CRC_32.Byte_List;
+
+         function Filtered (Scan : in Scanline; Prev : in Scanline) return Filtered_Scan;
+         -- Returns Scan, appropriately filtered
+
+         function Filtered (Scan : in Scanline; Prev : in Scanline) return Filtered_Scan is
+            use type Interfaces.Integer_8;
+
+            function To_Signed is new Ada.Unchecked_Conversion (Source => CRC_32.Byte_Value, Target => Interfaces.Integer_8);
+
+            function Signed (Byte : in CRC_32.Byte_Value) return Interfaces.Unsigned_32 is
+               (Interfaces.Unsigned_32 (abs Integer (To_Signed (Byte) ) ) );
+
+            function Paeth_Byte (Left : in CRC_32.Byte_Value; Up : in CRC_32.Byte_Value; Up_Left : in CRC_32.Byte_Value)
+            return CRC_32.Byte_Value;
+            -- The Paeth Predictor function
+
+            function Paeth_Byte (Left : in CRC_32.Byte_Value; Up : in CRC_32.Byte_Value; Up_Left : in CRC_32.Byte_Value)
+            return CRC_32.Byte_Value is
+               P   : constant Integer := Integer (Left) + Integer (Up) - Integer (Up_Left);
+               PA  : constant Integer := abs (P - Integer (Left   ) );
+               PB  : constant Integer := abs (P - Integer (Up     ) );
+               PC  : constant Integer := abs (P - Integer (Up_Left) );
+               Min : constant Integer := Integer'Min (Integer'Min (PA, PB), PC);
+            begin -- Paeth_Byte
+               if PA = Min then
+                  return Left;
+               end if;
+
+               if PB = Min then
+                  return Up;
+               end if;
+
+               return Up_Left;
+            end Paeth_Byte;
+
+            Sub      : Scanline;
+            Up       : Scanline;
+            Avg      : Scanline;
+            Pth      : Scanline;
+            Sum_None : Interfaces.Unsigned_32 := 0;
+            Sum_Sub  : Interfaces.Unsigned_32 := 0;
+            Sum_Up   : Interfaces.Unsigned_32 := 0;
+            Sum_Avg  : Interfaces.Unsigned_32 := 0;
+            Sum_Pth  : Interfaces.Unsigned_32 := 0;
+            Min      : Interfaces.Unsigned_32 := Interfaces.Unsigned_32'Last;
+
+            use type CRC_32.Byte_Value;
+         begin -- Filtered
+            All_Bytes : for I in Scan'Range loop
+               if I < 4 then -- First pixel of Scan
+                  Sub (I) := Scan (I);
+                  Avg (I) := Scan (I) - Prev (I) / 2;
+                  Pth (I) := Scan (I) - Prev (I);
+               else
+                  Sub (I) := Scan (I) - Scan (I - 3);
+                  Avg (I) := Scan (I) - CRC_32.Byte_Value ( (Integer (Scan (I - 3) ) + Integer (Prev (I) ) ) / 2);
+                  Pth (I) := Scan (I) - Paeth_Byte (Scan (I - 3), Prev (I), Prev (I - 3) );
+               end if;
+
+               Up (I) := Scan (I) - Prev (I);
+            end loop All_Bytes;
+
+            Sum : for I in Scan'Range loop
+               Sum_None := Sum_None + Signed (Scan (I) );
+               Sum_Sub  := Sum_Sub  + Signed (Sub  (I) );
+               Sum_Up   := Sum_Up   + Signed (Up   (I) );
+               Sum_Avg  := Sum_Avg  + Signed (Avg  (I) );
+               Sum_Pth  := Sum_Pth  + Signed (Pth  (I) );
+            end loop Sum;
+
+            Min := Interfaces.Unsigned_32'Min
+                      (Interfaces.Unsigned_32'Min
+                          (Interfaces.Unsigned_32'Min
+                             (Interfaces.Unsigned_32'Min (Sum_None, Sum_Sub), Sum_Up), Sum_Avg), Sum_Pth);
+
+            if Sum_None = Min then
+               return 0 & Scan;
+            end if;
+
+            if Sum_Sub = Min then
+               return 1 & Sub;
+            end if;
+
+            if Sum_Up = Min then
+               return 2 & Up;
+            end if;
+
+            if Sum_Avg = Min then
+               return 3 & Avg;
+            end if;
+
+            return 4 & Pth;
+         end Filtered;
+
+         function Extracted (Y : in Natural) return Scanline is
+            Result : Scanline;
+            To     : Positive := 1;
+         begin -- Extracted
+            Extract : for X in Image'Range (2) loop
+               Result (To + 0) := Image (Y, X).Red;
+               Result (To + 1) := Image (Y, X).Green;
+               Result (To + 2) := Image (Y, X).Blue;
+               To := To + 3;
+            end loop Extract;
+
+            return Result;
+         end Extracted;
+      begin -- Next
+         if X > Input'Last then
+            Prev := Scan;
+            Scan := Extracted (Y);
+            Input := Filtered (Scan, Prev);
+            X := 1;
+         end if;
+
+         X := X + 1;
+
+         if X > Input'Last then
+            Y := Y + 1;
+         end if;
+
+         return Input (X - 1);
+      end Next;
+
+      procedure Put (Byte : in Z_Compression.Byte_Value) is
+         -- Empty
+      begin -- Put
+         Output.Append (New_Item => Byte);
+         CRC_32.Update (CRC => CRC, Input => Byte);
+      end Put;
+
+      procedure Write (File : in RGB_IO.File_Type; Item : in Interfaces.Unsigned_32) is
+         -- Empty
+      begin -- Write
+         RGB_IO.Write (File => File, Item => RGB_Value (Item / 2 ** 24) );
+         RGB_IO.Write (File => File, Item => RGB_Value ( (Item / 2 ** 16) rem 256) );
+         RGB_IO.Write (File => File, Item => RGB_Value ( (Item / 256) rem 256) );
+         RGB_IO.Write (File => File, Item => RGB_Value (Item rem 256) );
+      end Write;
+
+      procedure Write (File : in RGB_IO.File_Type; Item : in Interfaces.Unsigned_32; CRC : in out CRC_32.CRC_Info) is
+         -- Empty
+      begin -- Write
+         Write (File => File, Item => Item);
+
+         CRC_32.Update (CRC => CRC, Input => RGB_Value (Item / 2 ** 24) );
+         CRC_32.Update (CRC => CRC, Input => RGB_Value ( (Item / 2 ** 16) rem 256) );
+         CRC_32.Update (CRC => CRC, Input => RGB_Value ( (Item / 256) rem 256) );
+         CRC_32.Update (CRC => CRC, Input => RGB_Value (Item rem 256) );
+      end Write;
+
+      Signature : constant CRC_32.Byte_List := (137, 80, 78, 71, 13, 10, 26, 10);
+      IHDR_ID   : constant CRC_32.Byte_List := (73, 72, 68, 82);
+      IDAT_ID   : constant CRC_32.Byte_List := (73, 68, 65, 84);
+      IEND_ID   : constant CRC_32.Byte_List := (73, 69, 78, 68);
+
+      File : RGB_IO.File_Type;
+
+      use type Ada.Containers.Count_Type;
+   begin -- Write_PNG
+      RGB_IO.Create (File => File, Mode => RGB_IO.Out_File, Name => File_Name);
+      Output.Reserve_Capacity (Capacity => 6 * Image'Length (1) * Image'Length (2) );
+
+      PNG_Signature : for Byte of Signature loop
+         RGB_IO.Write (File => File, Item => Byte);
+      end loop PNG_Signature;
+
+      -- IHDR chunk
+      Write (File => File, Item => 13); -- Length
+
+      IHDR : for Byte of IHDR_ID loop -- Chunk type
+         RGB_IO.Write (File => File, Item => Byte);
+      end loop IHDR;
+
+      CRC_32.Update (CRC => CRC, List => IHDR_ID);
+      Write (File => File, Item => Image'Length (2), CRC => CRC); -- Width
+      Write (File => File, Item => Image'Length (1), CRC => CRC); -- Height
+      RGB_IO.Write (File => File, Item => 8); -- Bit depth
+      CRC_32.Update (CRC => CRC, Input => 8);
+      RGB_IO.Write (File => File, Item => 2); -- Color type
+      CRC_32.Update (CRC => CRC, Input => 2);
+      RGB_IO.Write (File => File, Item => 0); -- Compression method
+      CRC_32.Update (CRC => CRC, Input => 0);
+      RGB_IO.Write (File => File, Item => 0); -- Filter method
+      CRC_32.Update (CRC => CRC, Input => 0);
+      RGB_IO.Write (File => File, Item => 0); -- Interlace method
+      CRC_32.Update (CRC => CRC, Input => 0);
+      Write (File => File, Item => CRC_32.Final (CRC) );
+
+      -- IDAT chunk
+      CRC_32.Reset (CRC => CRC);
+      CRC_32.Update (CRC => CRC, List => IDAT_ID);
+      Compress (Method => Z_Compression.Deflate_3);
+      Write (File => File, Item => Interfaces.Unsigned_32 (Output.Length) ); -- Length
+
+      IDAT : for Byte of IDAT_ID loop -- Chunk type
+         RGB_IO.Write (File => File, Item => Byte);
+      end loop IDAT;
+
+      Data : for I in 1 .. Output.Last_Index loop
+         RGB_IO.Write (File => File, Item => Output.Element (I) );
+      end loop Data;
+
+      Write (File => File, Item => CRC_32.Final (CRC) );
+
+      -- IEND chunk
+      CRC_32.Reset (CRC => CRC);
+      Write (File => File, Item => 0); -- Length
+
+      IEND : for Byte of IEND_ID loop -- Chunk type
+         RGB_IO.Write (File => File, Item => Byte);
+      end loop IEND;
+
+      CRC_32.Update (CRC => CRC, List => IEND_ID);
+      Write (File => File, Item => CRC_32.Final (CRC) );
+
+      RGB_IO.Close (File => File);
+   end Write_PNG;
 
    procedure Read (Name : in String; Image : in out Holders.Handle) is
       procedure Load (Image : in out Image_Data);

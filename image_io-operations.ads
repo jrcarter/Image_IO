@@ -1,4 +1,4 @@
--- Image I/O: output in PPM, BMP, and QOI formats; input in BMP, GIF, JPG, PNG, PNM, QOI, and TGA formats
+-- Image I/O: output in PPM, BMP, PNG, and QOI formats; input in BMP, GIF, JPG, PNG, PNM, QOI, and TGA formats
 -- Copyright (C) by Pragmada Software Engineering
 -- Released under the terms of the BSD 3-Clause license; see https://opensource.org/licenses
 
@@ -21,6 +21,9 @@ package Image_IO.Operations is
 
    procedure Write_QOI (File_Name : in String; Image : in Image_Data);
    -- Creates a file named Name; writes Image to it in QOI format; and closes the file
+
+   procedure Write_PNG (File_Name : in String; Image : in Image_Data);
+   -- Creates a file named Name; writes Image to it in PNG format; and closes the file
 
    procedure Read (Name : in String; Image : in out Holders.Handle) with
       Pre => Ada.Directories.Exists (Name) and then Ada.Directories.Kind (Name) in Ada.Directories.Ordinary_File;
