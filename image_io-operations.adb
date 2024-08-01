@@ -249,14 +249,16 @@ package body Image_IO.Operations is
       end Write;
    end Write_QOI;
 
-   procedure Write_PNG (File_Name : in String; Image : in Image_Data) is
+   procedure Write_PNG (File_Name : in String; Image : in Image_Data; Grayscale : in Boolean := False) is
       procedure Write (File : in RGB_IO.File_Type; Item : in Interfaces.Unsigned_32);
       -- Writes the 4 bytes of Item to File, MSB first
 
       procedure Write (File : in RGB_IO.File_Type; Item : in Interfaces.Unsigned_32; CRC : in out CRC_32.CRC_Info);
       -- Writes the 4 bytes of Item to File, MSB first, and updates CRC with those bytes
 
-      subtype Scanline is CRC_32.Byte_List (1 .. 3 * Image'Length (2) );
+      BPP : constant Positive := (if Grayscale then 1 else 3); -- Bytes per pixel
+
+      subtype Scanline is CRC_32.Byte_List (1 .. BPP * Image'Length (2) );
       subtype Filtered_Scan is CRC_32.Byte_List (1 .. Scanline'Last + 1);
 
       package Compressed_Lists is new Ada.Containers.Vectors
@@ -338,14 +340,14 @@ package body Image_IO.Operations is
             use type CRC_32.Byte_Value;
          begin -- Filtered
             All_Bytes : for I in Scan'Range loop
-               if I < 4 then -- First pixel of Scan
+               if I < BPP + 1 then -- First pixel of Scan
                   Sub (I) := Scan (I);
                   Avg (I) := Scan (I) - Prev (I) / 2;
                   Pth (I) := Scan (I) - Prev (I);
                else
-                  Sub (I) := Scan (I) - Scan (I - 3);
-                  Avg (I) := Scan (I) - CRC_32.Byte_Value ( (Integer (Scan (I - 3) ) + Integer (Prev (I) ) ) / 2);
-                  Pth (I) := Scan (I) - Paeth_Byte (Scan (I - 3), Prev (I), Prev (I - 3) );
+                  Sub (I) := Scan (I) - Scan (I - BPP);
+                  Avg (I) := Scan (I) - CRC_32.Byte_Value ( (Integer (Scan (I - BPP) ) + Integer (Prev (I) ) ) / 2);
+                  Pth (I) := Scan (I) - Paeth_Byte (Scan (I - BPP), Prev (I), Prev (I - BPP) );
                end if;
 
                Up (I) := Scan (I) - Prev (I);
@@ -388,10 +390,14 @@ package body Image_IO.Operations is
             To     : Positive := 1;
          begin -- Extracted
             Extract : for X in Image'Range (2) loop
-               Result (To + 0) := Image (Y, X).Red;
-               Result (To + 1) := Image (Y, X).Green;
-               Result (To + 2) := Image (Y, X).Blue;
-               To := To + 3;
+               Result (To) := Image (Y, X).Red;
+
+               if not Grayscale then
+                  Result (To + 1) := Image (Y, X).Green;
+                  Result (To + 2) := Image (Y, X).Blue;
+               end if;
+
+               To := To + BPP;
             end loop Extract;
 
             return Result;
@@ -468,8 +474,8 @@ package body Image_IO.Operations is
       Write (File => File, Item => Image'Length (1), CRC => CRC); -- Height
       RGB_IO.Write (File => File, Item => 8); -- Bit depth
       CRC_32.Update (CRC => CRC, Input => 8);
-      RGB_IO.Write (File => File, Item => 2); -- Color type
-      CRC_32.Update (CRC => CRC, Input => 2);
+      RGB_IO.Write (File => File, Item => (if Grayscale then 0 else 2) ); -- Color type
+      CRC_32.Update (CRC => CRC, Input => (if Grayscale then 0 else 2) );
       RGB_IO.Write (File => File, Item => 0); -- Compression method
       CRC_32.Update (CRC => CRC, Input => 0);
       RGB_IO.Write (File => File, Item => 0); -- Filter method
