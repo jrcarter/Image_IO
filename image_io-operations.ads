@@ -1,6 +1,9 @@
 -- Image I/O: output in PPM, BMP, PNG, and QOI formats; input in BMP, GIF, JPG, PNG, PNM, QOI, and TGA formats
--- Copyright (C) by Pragmada Software Engineering
--- Released under the terms of the BSD 3-Clause license; see https://opensource.org/licenses
+-- Copyright (C) by PragmAda Software Engineering
+-- SPDX-License-Identifier: BSD-3-Clause
+-- See https://spdx.org/licenses/
+-- If you find this software useful, please let me know, either through
+-- github.com/jrcarter or directly to pragmada@pragmada.x10hosting.com
 
 with Ada.Directories;
 with Image_IO.Holders;
